@@ -2,14 +2,12 @@
 
 import os
 import sys
-import tempfile
+import re
 import pptx
 import openai
 import numpy as np
 import whisper
 from pptx import Presentation
-from pydub import AudioSegment
-from collections import Counter
 from datetime import datetime
 
 # ==== 設定 ====
@@ -19,7 +17,7 @@ os.environ['OPENAI_API_KEY'] = 'sk-proj-*****'
 def transcribe_audio(file_path):
     model = whisper.load_model("base")
     result = model.transcribe(file_path, fp16=False, language='ja')
-    
+
     # 出力ファイル名にタイムスタンプを付加
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"transcription_{timestamp}.txt"
@@ -27,6 +25,7 @@ def transcribe_audio(file_path):
         f.write(result['text'])
 
     return result['text'], result['segments']
+
 
 def analyze_speech(segments):
     total_words = sum(len(seg['text'].split()) for seg in segments)
@@ -36,7 +35,6 @@ def analyze_speech(segments):
     filler_words = ['えーと', 'あの', 'えっと', 'その']
     filler_count = sum(sum(word in seg['text'] for word in filler_words) for seg in segments)
 
-    # 仮の簡易指標
     pause_lengths = [segments[i+1]['start'] - segments[i]['end'] for i in range(len(segments)-1)]
     long_pauses = sum(1 for p in pause_lengths if p > 1.0)
 
@@ -45,6 +43,7 @@ def analyze_speech(segments):
         "filler_count": filler_count,
         "long_pauses": long_pauses
     }
+
 
 # ==== 資料分析モジュール ====
 def extract_ppt_text(file_path):
@@ -62,6 +61,7 @@ def extract_ppt_text(file_path):
         })
     return slides_info
 
+
 def analyze_slide_structure(slides_info):
     avg_chars = np.mean([s['char_count'] for s in slides_info])
     total_images = sum(s['image_count'] for s in slides_info)
@@ -70,6 +70,7 @@ def analyze_slide_structure(slides_info):
         "total_images": total_images,
         "slide_count": len(slides_info)
     }
+
 
 # ==== 評価とアドバイス生成 ====
 def generate_evaluation(transcription, slide_data):
@@ -87,7 +88,16 @@ def generate_evaluation(transcription, slide_data):
 
 以下の4つの観点（内容、プレゼン技術、視覚資料、構成）について、それぞれ5段階で評価し、簡単な理由と改善点、長所を出力してください。
 最後に3つの改善点と具体的なアドバイスも示してください。
+
+フォーマットは必ず以下としてください：
+内容: ○点
+プレゼン技術: ○点
+視覚資料: ○点
+構成: ○点
+
+その後に評価コメントを書いてください。
 """
+
     response = client.chat.completions.create(
         model="gpt-4.1",
         messages=[
@@ -95,7 +105,32 @@ def generate_evaluation(transcription, slide_data):
             {"role": "user", "content": prompt}
         ]
     )
-    return response.choices[0].message.content
+
+    content = response.choices[0].message.content
+    return content
+
+
+# ==== スコア抽出 ====
+def extract_scores(evaluation_text):
+    pattern = r"内容: (\d)点.*?プレゼン技術: (\d)点.*?視覚資料: (\d)点.*?構成: (\d)点"
+    match = re.search(pattern, evaluation_text, re.DOTALL)
+
+    if match:
+        return {
+            "内容": int(match.group(1)),
+            "プレゼン技術": int(match.group(2)),
+            "視覚資料": int(match.group(3)),
+            "構成": int(match.group(4))
+        }
+    else:
+        print("スコアの抽出に失敗しました。デフォルトで全て0点とします。")
+        return {
+            "内容": 0,
+            "プレゼン技術": 0,
+            "視覚資料": 0,
+            "構成": 0
+        }
+
 
 # ==== スコア集計 ====
 def compute_score(sub_scores):
@@ -106,7 +141,8 @@ def compute_score(sub_scores):
         "構成": 0.2
     }
     total = sum(sub_scores[k] * weights[k] for k in weights)
-    return round(total * 20, 1)
+    return round(total * 20, 1)  # 100点満点換算
+
 
 # ==== プレゼン評価処理 ====
 def evaluate_presentation(audio_path, ppt_path):
@@ -120,12 +156,33 @@ def evaluate_presentation(audio_path, ppt_path):
 
     evaluation = generate_evaluation(text, slide_summary)
 
+    # GPTの出力からスコアを抽出
+    sub_scores = extract_scores(evaluation)
+    total_score = compute_score(sub_scores)
+
     print("==== 音声分析 ====")
     print(speech_analysis)
     print("\n==== スライド分析 ====")
     print(slide_analysis)
     print("\n==== GPT評価 ====")
     print(evaluation)
+    print(f"\n==== 総合得点: {total_score}点 ====")
+
+    # 評価結果をファイルに保存
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_filename = f"evaluation_result_{timestamp}.txt"
+
+    with open(result_filename, "w", encoding="utf-8") as f:
+        f.write("==== 音声分析 ====\n")
+        f.write(str(speech_analysis) + "\n\n")
+        f.write("==== スライド分析 ====\n")
+        f.write(str(slide_analysis) + "\n\n")
+        f.write("==== GPT評価 ====\n")
+        f.write(evaluation + "\n\n")
+        f.write(f"==== 総合得点: {total_score}点 ====\n")
+
+    print(f"\n評価結果をファイルに保存しました: {result_filename}")
+
 
 # ==== メイン関数 ====
 def main():
@@ -145,6 +202,7 @@ def main():
         sys.exit(1)
 
     evaluate_presentation(audio_path, ppt_path)
+
 
 if __name__ == "__main__":
     main()
