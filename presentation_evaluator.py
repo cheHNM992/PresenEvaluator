@@ -8,6 +8,7 @@ import openai
 import numpy as np
 import whisper
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 from datetime import datetime
 
 # ==== 設定 ====
@@ -52,7 +53,7 @@ def extract_ppt_text(file_path):
     for i, slide in enumerate(prs.slides):
         slide_text = "\n".join([shape.text for shape in slide.shapes if hasattr(shape, "text")])
         slide_chars = len(slide_text)
-        image_count = sum(1 for shape in slide.shapes if "Picture" in shape.name)
+        image_count = sum(1 for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE)
         slides_info.append({
             "slide_number": i + 1,
             "text": slide_text,
@@ -86,14 +87,14 @@ def generate_evaluation(transcription, slide_data):
 [スライド概要]:
 {slide_data}
 
-以下の4つの観点（内容、プレゼン技術、視覚資料、構成）について、それぞれ5段階で評価し、簡単な理由と改善点、長所を出力してください。
+以下の4つの観点（内容、プレゼン技術、視覚資料、構成）について、それぞれ5段階（小数点1桁まで）で評価し、簡単な理由と改善点、長所を出力してください。
 最後に3つの改善点と具体的なアドバイスも示してください。
 
 フォーマットは必ず以下としてください：
-内容: ○点
-プレゼン技術: ○点
-視覚資料: ○点
-構成: ○点
+内容: ○.○点
+プレゼン技術: ○.○点
+視覚資料: ○.○点
+構成: ○.○点
 
 その後に評価コメントを書いてください。
 """
@@ -112,23 +113,23 @@ def generate_evaluation(transcription, slide_data):
 
 # ==== スコア抽出 ====
 def extract_scores(evaluation_text):
-    pattern = r"内容: (\d)点.*?プレゼン技術: (\d)点.*?視覚資料: (\d)点.*?構成: (\d)点"
+    pattern = r"内容: ([0-5](?:\.\d)?)点.*?プレゼン技術: ([0-5](?:\.\d)?)点.*?視覚資料: ([0-5](?:\.\d)?)点.*?構成: ([0-5](?:\.\d)?)点"
     match = re.search(pattern, evaluation_text, re.DOTALL)
 
     if match:
         return {
-            "内容": int(match.group(1)),
-            "プレゼン技術": int(match.group(2)),
-            "視覚資料": int(match.group(3)),
-            "構成": int(match.group(4))
+            "内容": float(match.group(1)),
+            "プレゼン技術": float(match.group(2)),
+            "視覚資料": float(match.group(3)),
+            "構成": float(match.group(4))
         }
     else:
-        print("スコアの抽出に失敗しました。デフォルトで全て0点とします。")
+        print("スコアの抽出に失敗しました。デフォルトで全て0.0点とします。")
         return {
-            "内容": 0,
-            "プレゼン技術": 0,
-            "視覚資料": 0,
-            "構成": 0
+            "内容": 0.0,
+            "プレゼン技術": 0.0,
+            "視覚資料": 0.0,
+            "構成": 0.0
         }
 
 
