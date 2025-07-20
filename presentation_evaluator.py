@@ -12,7 +12,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from datetime import datetime
 
 # ==== 設定 ====
-openai.api_key = 'sk-proj-*****'  # ご自身のAPIキーに置き換えてください
+os.environ['OPENAI_API_KEY'] = 'sk-proj-*****'  # ご自身のAPIキーに置き換えてください
 
 # ==== 音声分析モジュール ====
 def transcribe_audio(file_path):
@@ -97,7 +97,7 @@ def analyze_image(image_path):
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "この画像に何が写っているか説明し、プレゼン資料として適切か評価してください。視覚資料としての質も5段階（小数点1桁まで）で採点してください。フォーマット: 視覚資料: ○.○点"},
+                    {"type": "text", "text": "この画像に何が写っているか説明し、プレゼン資料として適切か評価してください。視覚資料としての質も100点満点（整数）で採点してください。フォーマット: 視覚資料: ○点"},
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64_image}"}}
                 ]
             }
@@ -107,18 +107,17 @@ def analyze_image(image_path):
 
 
 def extract_visual_score(image_analysis):
-    pattern = r"視覚資料: ([0-5](?:\.\d)?)点"
+    pattern = r"視覚資料: ([0-9]{1,3})点"
     matches = re.findall(pattern, image_analysis)
     if matches:
-        scores = [float(score) for score in matches]
-        return round(sum(scores) / len(scores), 1)
-    return 0.0
+        scores = [int(score) for score in matches] # Convert to int
+        return int(sum(scores) / len(scores)) # Return as int
+    return 0
 
 
 def analyze_all_images(image_files):
     all_analyses = []
     for image_path in image_files:
-        print(f"画像を解析中: {image_path}")
         analysis = analyze_image(image_path)
         all_analyses.append(f"{image_path}:\n{analysis}\n")
     return "\n".join(all_analyses)
@@ -127,6 +126,7 @@ def analyze_all_images(image_files):
 def analyze_slide(slide_text):
     response = openai.chat.completions.create(
         model="gpt-4.1",
+#        model="gpt-4.1-nano-2025-04-14",
         messages=[
             {"role": "system", "content": "あなたはプロのプレゼン資料評価者です。"},
             {"role": "user", "content": f"""
@@ -135,9 +135,9 @@ def analyze_slide(slide_text):
 [スライド全文]
 {slide_text}
 
-この資料のスライド数、各スライドの文字量の適切さ、視覚的な情報量（図表や画像の有無）を評価し、全体的な視覚資料の質を以下のフォーマットで5段階（小数点1桁まで）で評価してください。
+この資料のスライド数、各スライドの文字量の適切さ、視覚的な情報量（図表や画像の有無）を評価し、全体的な視覚資料の質を以下のフォーマットで100点満点（整数）で評価してください。
 
-視覚資料: ○.○点
+視覚資料: ○点
 
 その後に資料の良い点と改善点を簡単にまとめてください。
 """}
@@ -149,6 +149,7 @@ def analyze_slide(slide_text):
 def generate_evaluation_with_images(transcription, slide_analysis, image_analysis):
     response = openai.chat.completions.create(
         model="gpt-4.1",
+#        model="gpt-4.1-nano-2025-04-14",
         messages=[
             {"role": "system", "content": "あなたはプロのプレゼン評価者です。"},
             {"role": "user", "content": f"""
@@ -163,14 +164,14 @@ def generate_evaluation_with_images(transcription, slide_analysis, image_analysi
 [画像分析]:
 {image_analysis}
 
-以下の4つの観点（内容、プレゼン技術、視覚資料、構成）について、それぞれ5段階（小数点1桁まで）で評価し、簡単な理由と改善点、長所を出力してください。
+以下の4つの観点（内容、プレゼン技術、視覚資料、構成）について、それぞれ100点満点（整数）で評価し、簡単な理由と改善点、長所を出力してください。
 最後に3つの改善点と具体的なアドバイスも示してください。
 
 フォーマットは必ず以下としてください：
-内容: ○.○点
-プレゼン技術: ○.○点
-視覚資料: ○.○点
-構成: ○.○点
+内容: ○点
+プレゼン技術: ○点
+視覚資料: ○点
+構成: ○点
 
 その後に評価コメントを書いてください。
 """}
@@ -181,23 +182,23 @@ def generate_evaluation_with_images(transcription, slide_analysis, image_analysi
 
 # ==== スコア抽出 ====
 def extract_scores(evaluation_text):
-    pattern = r"内容: ([0-5](?:\.\d)?)点.*?プレゼン技術: ([0-5](?:\.\d)?)点.*?視覚資料: ([0-5](?:\.\d)?)点.*?構成: ([0-5](?:\.\d)?)点"
+    pattern = r"内容: ([0-9]{1,3})点.*?プレゼン技術: ([0-9]{1,3})点.*?視覚資料: ([0-9]{1,3})点.*?構成: ([0-9]{1,3})点"
     match = re.search(pattern, evaluation_text, re.DOTALL)
 
     if match:
         return {
-            "内容": float(match.group(1)),
-            "プレゼン技術": float(match.group(2)),
-            "視覚資料": float(match.group(3)),
-            "構成": float(match.group(4))
+            "内容": int(match.group(1)),  # Convert to int
+            "プレゼン技術": int(match.group(2)), # Convert to int
+            "視覚資料": int(match.group(3)), # Convert to int
+            "構成": int(match.group(4))  # Convert to int
         }
     else:
-        print("スコアの抽出に失敗しました。デフォルトで全て0.0点とします。")
+        print("スコアの抽出に失敗しました。デフォルトで全て0点とします。")
         return {
-            "内容": 0.0,
-            "プレゼン技術": 0.0,
-            "視覚資料": 0.0,
-            "構成": 0.0
+            "内容": 0,
+            "プレゼン技術": 0,
+            "視覚資料": 0,
+            "構成": 0
         }
 
 
@@ -209,56 +210,49 @@ def compute_score(sub_scores):
         "視覚資料": 0.2,
         "構成": 0.2
     }
-    total = sum(sub_scores[k] * weights[k] for k in weights)
-    return round(total * 20, 1)
+    total = sum(float(sub_scores[k]) * weights[k] for k in weights)
+    return int(round(total, 0)) # Round to nearest integer and cast to int
 
 
 # ==== プレゼン評価処理 ====
 def evaluate_presentation(audio_path, ppt_path):
+    print(f"音声分析中")
     text, segments = transcribe_audio(audio_path)
     speech_analysis = analyze_speech(segments)
 
+    print(f"資料分析中")
     slides_text = extract_ppt_text(ppt_path)
     slide_analysis = analyze_slide(slides_text)
 
+    print(f"画像解析中")
     image_files = extract_images_from_ppt(ppt_path, "extracted_images")
     if image_files:
         image_analysis = analyze_all_images(image_files)
         image_visual_score = extract_visual_score(image_analysis)
     else:
         image_analysis = "画像は含まれていません。"
-        image_visual_score = 0.0
+        image_visual_score = 0
 
     evaluation = generate_evaluation_with_images(text, slide_analysis, image_analysis)
 
     sub_scores = extract_scores(evaluation)
-    sub_scores["視覚資料"] = round((sub_scores["視覚資料"] + image_visual_score) / 2, 1)
+    sub_scores["視覚資料"] = int(round((sub_scores["視覚資料"] + image_visual_score) / 2, 0))
 
     total_score = compute_score(sub_scores)
-
-    print("==== 音声分析 ====")
-    print(speech_analysis)
-    print("\n==== スライド分析 ====")
-    print(slide_analysis)
-    print("\n==== 画像分析 ====")
-    print(image_analysis)
-    print("\n==== 総合評価 ====")
-    print(evaluation)
-    print(f"\n==== 総合得点: {total_score}点 ====")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     result_filename = f"evaluation_result_{timestamp}.txt"
 
     with open(result_filename, "w", encoding="utf-8") as f:
+        f.write(f"==== 総合得点: {total_score}点 ====\n\n")
+        f.write("==== 総合評価 ====\n")
+        f.write(evaluation + "\n\n")
         f.write("==== 音声分析 ====\n")
         f.write(str(speech_analysis) + "\n\n")
         f.write("==== スライド分析 ====\n")
         f.write(slide_analysis + "\n\n")
-        f.write("==== 画像分析 ====\n")
-        f.write(image_analysis + "\n\n")
-        f.write("==== 総合評価 ====\n")
-        f.write(evaluation + "\n\n")
-        f.write(f"==== 総合得点: {total_score}点 ====\n")
+#        f.write("==== 画像分析 ====\n")
+#        f.write(image_analysis + "\n\n")
 
     print(f"\n評価結果をファイルに保存しました: {result_filename}")
 
