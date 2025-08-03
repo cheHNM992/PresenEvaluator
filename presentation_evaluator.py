@@ -92,6 +92,7 @@ def analyze_image(image_path):
     base64_image = encode_image_to_base64(image_path)
     response = openai.chat.completions.create(
         model="gpt-4o",
+#        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "あなたは画像解析の専門家です。"},
             {
@@ -123,10 +124,10 @@ def analyze_all_images(image_files):
     return "\n".join(all_analyses)
 
 
-def analyze_slide(slide_text):
+def analyze_slide_text(slide_text):
     response = openai.chat.completions.create(
         model="gpt-4.1",
-#        model="gpt-4.1-nano-2025-04-14",
+#        model="gpt-4.1-mini",
         messages=[
             {"role": "system", "content": "あなたはプロのプレゼン資料評価者です。"},
             {"role": "user", "content": f"""
@@ -135,9 +136,10 @@ def analyze_slide(slide_text):
 [スライド全文]
 {slide_text}
 
-この資料のスライド数、各スライドの文字量の適切さ、視覚的な情報量（図表や画像の有無）を評価し、全体的な視覚資料の質を以下のフォーマットで100点満点（整数）で評価してください。
+この資料のスライド数、各スライドの文字量の適切さ、内容を評価し、全体的な資料の質を以下のフォーマットで100点満点（整数）で評価してください。
+ただし、図表や画像は評価に含めないでください。
 
-視覚資料: ○点
+資料: ○点
 
 その後に資料の良い点と改善点を簡単にまとめてください。
 """}
@@ -146,10 +148,10 @@ def analyze_slide(slide_text):
     return response.choices[0].message.content
 
 
-def generate_evaluation_with_images(transcription, slide_analysis, image_analysis):
+def generate_evaluation_with_images(transcription, slide_text_analysis, image_analysis):
     response = openai.chat.completions.create(
         model="gpt-4.1",
-#        model="gpt-4.1-nano-2025-04-14",
+#        model="gpt-4.1-mini",
         messages=[
             {"role": "system", "content": "あなたはプロのプレゼン評価者です。"},
             {"role": "user", "content": f"""
@@ -158,8 +160,8 @@ def generate_evaluation_with_images(transcription, slide_analysis, image_analysi
 [文字起こし]:
 {transcription}
 
-[スライド分析]:
-{slide_analysis}
+[スライドテキスト分析]:
+{slide_text_analysis}
 
 [画像分析]:
 {image_analysis}
@@ -222,7 +224,7 @@ def evaluate_presentation(audio_path, ppt_path):
 
     print(f"資料分析中")
     slides_text = extract_ppt_text(ppt_path)
-    slide_analysis = analyze_slide(slides_text)
+    slide_text_analysis = analyze_slide_text(slides_text)
 
     print(f"画像解析中")
     image_files = extract_images_from_ppt(ppt_path, "extracted_images")
@@ -233,7 +235,7 @@ def evaluate_presentation(audio_path, ppt_path):
         image_analysis = "画像は含まれていません。"
         image_visual_score = 0
 
-    evaluation = generate_evaluation_with_images(text, slide_analysis, image_analysis)
+    evaluation = generate_evaluation_with_images(text, slide_text_analysis, image_analysis)
 
     sub_scores = extract_scores(evaluation)
     sub_scores["視覚資料"] = int(round((sub_scores["視覚資料"] + image_visual_score) / 2, 0))
@@ -249,9 +251,9 @@ def evaluate_presentation(audio_path, ppt_path):
         f.write(evaluation + "\n\n")
         f.write("==== 音声分析 ====\n")
         f.write(str(speech_analysis) + "\n\n")
-        f.write("==== スライド分析 ====\n")
-        f.write(slide_analysis + "\n\n")
-#        f.write("==== 画像分析 ====\n")
+#        f.write("==== スライドテキスト分析 ====\n")    #テキストのみの分析結果とならないため非表示
+#        f.write(slide_text_analysis + "\n\n")
+#        f.write("==== 画像分析 ====\n")               #冗長な結果しか出力できないため非表示
 #        f.write(image_analysis + "\n\n")
 
     print(f"\n評価結果をファイルに保存しました: {result_filename}")
