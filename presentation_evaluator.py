@@ -91,8 +91,8 @@ def encode_image_to_base64(image_path):
 def analyze_image(image_path):
     base64_image = encode_image_to_base64(image_path)
     response = openai.chat.completions.create(
-        model="gpt-4o",
-#        model="gpt-4o-mini",
+        model="gpt-5",
+#        model="gpt-5-nano",
         messages=[
             {"role": "system", "content": "あなたは画像解析の専門家です。"},
             {
@@ -126,8 +126,8 @@ def analyze_all_images(image_files):
 
 def analyze_slide_text(slide_text):
     response = openai.chat.completions.create(
-        model="gpt-4.1",
-#        model="gpt-4.1-mini",
+        model="gpt-5",
+#        model="gpt-5-nano",
         messages=[
             {"role": "system", "content": "あなたはプロのプレゼン資料評価者です。"},
             {"role": "user", "content": f"""
@@ -150,8 +150,8 @@ def analyze_slide_text(slide_text):
 
 def generate_evaluation_with_images(transcription, slide_text_analysis, image_analysis):
     response = openai.chat.completions.create(
-        model="gpt-4.1",
-#        model="gpt-4.1-mini",
+        model="gpt-5",
+#        model="gpt-5-nano",
         messages=[
             {"role": "system", "content": "あなたはプロのプレゼン評価者です。"},
             {"role": "user", "content": f"""
