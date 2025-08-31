@@ -13,12 +13,15 @@ from datetime import datetime
 
 # ==== 設定 ====
 os.environ['OPENAI_API_KEY'] = 'sk-proj-*****'  # ご自身のAPIキーに置き換えてください
+model_llm = "gpt-5"
+#model_llm = "gpt-5-nano"
+model_whisper = "whisper-1"
 
 # ==== 音声分析モジュール ====
 def transcribe_audio(file_path):
     audio_file = open(file_path, "rb")
     response = openai.audio.transcriptions.create(
-        model="whisper-1",
+        model=model_whisper,
         file=audio_file,
         response_format="verbose_json",
         language="ja"
@@ -91,8 +94,7 @@ def encode_image_to_base64(image_path):
 def analyze_image(image_path):
     base64_image = encode_image_to_base64(image_path)
     response = openai.chat.completions.create(
-        model="gpt-5",
-#        model="gpt-5-nano",
+        model=model_llm,
         messages=[
             {"role": "system", "content": "あなたは画像解析の専門家です。"},
             {
@@ -126,8 +128,7 @@ def analyze_all_images(image_files):
 
 def analyze_slide_text(slide_text):
     response = openai.chat.completions.create(
-        model="gpt-5",
-#        model="gpt-5-nano",
+        model=model_llm,
         messages=[
             {"role": "system", "content": "あなたはプロのプレゼン資料評価者です。"},
             {"role": "user", "content": f"""
@@ -150,8 +151,7 @@ def analyze_slide_text(slide_text):
 
 def generate_evaluation_with_images(transcription, slide_text_analysis, image_analysis):
     response = openai.chat.completions.create(
-        model="gpt-5",
-#        model="gpt-5-nano",
+        model=model_llm,
         messages=[
             {"role": "system", "content": "あなたはプロのプレゼン評価者です。"},
             {"role": "user", "content": f"""
