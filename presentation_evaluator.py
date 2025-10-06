@@ -238,6 +238,9 @@ def evaluate_presentation(audio_path, ppt_path):
     evaluation = generate_evaluation_with_images(text, slide_text_analysis, image_analysis)
 
     sub_scores = extract_scores(evaluation)
+    # 画像なしの場合は画像の得点を判定しないようにする
+    if image_visual_score == 0:
+        image_visual_score = sub_scores["視覚資料"]
     sub_scores["視覚資料"] = int(round((sub_scores["視覚資料"] + image_visual_score) / 2, 0))
 
     total_score = compute_score(sub_scores)
