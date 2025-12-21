@@ -13,7 +13,7 @@ from datetime import datetime
 
 # ==== 設定 ====
 os.environ['OPENAI_API_KEY'] = 'sk-proj-*****'  # ご自身のAPIキーに置き換えてください
-model_llm = "gpt-5"
+model_llm = "gpt-5.2-2025-12-11"
 #model_llm = "gpt-5-nano"
 model_whisper = "whisper-1"
 
@@ -92,6 +92,7 @@ def encode_image_to_base64(image_path):
 
 
 def analyze_image(image_path):
+    print(f"ファイル名: {image_path}")  # 画像分析で失敗する可能性があるため、デバッグ用に出力を追加
     base64_image = encode_image_to_base64(image_path)
     response = openai.chat.completions.create(
         model=model_llm,
