@@ -5,7 +5,6 @@ import sys
 import re
 import pptx
 import openai
-import numpy as np
 import base64
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -114,8 +113,8 @@ def extract_visual_score(image_analysis):
     pattern = r"視覚資料: ([0-9]{1,3})点"
     matches = re.findall(pattern, image_analysis)
     if matches:
-        scores = [int(score) for score in matches] # Convert to int
-        return int(sum(scores) / len(scores)) # Return as int
+        scores = [int(score) for score in matches]
+        return int(sum(scores) / len(scores))
     return 0
 
 
@@ -190,10 +189,10 @@ def extract_scores(evaluation_text):
 
     if match:
         return {
-            "内容": int(match.group(1)),  # Convert to int
-            "プレゼン技術": int(match.group(2)), # Convert to int
-            "視覚資料": int(match.group(3)), # Convert to int
-            "構成": int(match.group(4))  # Convert to int
+            "内容": int(match.group(1)),
+            "プレゼン技術": int(match.group(2)),
+            "視覚資料": int(match.group(3)),
+            "構成": int(match.group(4))
         }
     else:
         print("スコアの抽出に失敗しました。デフォルトで全て0点とします。")
@@ -214,7 +213,7 @@ def compute_score(sub_scores):
         "構成": 0.2
     }
     total = sum(float(sub_scores[k]) * weights[k] for k in weights)
-    return int(round(total, 0)) # Round to nearest integer and cast to int
+    return int(round(total, 0))
 
 
 # ==== プレゼン評価処理 ====

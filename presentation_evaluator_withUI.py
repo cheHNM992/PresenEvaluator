@@ -6,9 +6,7 @@ import sys
 import re
 import pptx
 import openai
-import numpy as np
 import base64
-import pandas as pd
 import shutil
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -136,7 +134,7 @@ def encode_image_to_base64(image_path):
 
 
 def analyze_image(image_path):
-    st.write("ファイル名: {image_path}")
+    print(f"ファイル名: {image_path}")  # 画像分析で失敗する可能性があるため、デバッグ用に出力を追加
     base64_image = encode_image_to_base64(image_path)
     response = client.chat.completions.create(
         model=model_llm,
@@ -239,13 +237,27 @@ def extract_scores(evaluation_text):
             "視覚資料": int(match.group(3)),
             "構成": int(match.group(4))
         }
-    return {"内容": 0, "プレゼン技術": 0, "視覚資料": 0, "構成": 0}
+    else:
+        print("スコアの抽出に失敗しました。デフォルトで全て0点とします。")
+        return {
+            "内容": 0,
+            "プレゼン技術": 0,
+            "視覚資料": 0,
+            "構成": 0
+        }
 
 
+# ==== スコア集計 ====
 def compute_score(sub_scores):
-    weights = {"内容": 0.3, "プレゼン技術": 0.3, "視覚資料": 0.2, "構成": 0.2}
+    weights = {
+        "内容": 0.3,
+        "プレゼン技術": 0.3,
+        "視覚資料": 0.2,
+        "構成": 0.2
+    }
     total = sum(float(sub_scores[k]) * weights[k] for k in weights)
     return int(round(total, 0))
+
 
 # ==== Web UI メイン処理 ====
 col1, col2 = st.columns(2)
@@ -326,30 +338,19 @@ if st.button("📊 プレゼンを分析する", use_container_width=True):
             # ==== 結果表示セクション ====
             st.divider()
             
-            # 総合得点の表示
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.metric(label="総合得点", value=f"{total_score} 点")
-                # レーダーチャート用データ準備
-                score_data = pd.DataFrame({
-                    "項目": list(sub_scores.keys()),
-                    "得点": list(sub_scores.values())
-                })
-                st.bar_chart(score_data.set_index("項目"))
-
-            with c2:
-                st.subheader("🔊 音声分析")
-                sc1, sc2, sc3 = st.columns(3)
-                sc1.metric("話す速さ (WPM)", speech_analysis['wpm'])
-                sc2.metric("フィラー数", speech_analysis['filler_count'])
-                sc3.metric("長い沈黙", speech_analysis['long_pauses'])
-
-            st.divider()
-            
             # タブによる詳細表示
             tab1, tab2, tab3 = st.tabs(["📝 総合評価レポート", "📖 文字起こし全文", "🖼️ スライド分析詳細"])
             
             with tab1:
+                # 総合得点をタブの冒頭に配置
+                st.subheader(f"📊 総合スコア: {total_score} 点")
+                
+                # 各項目の内訳を小さく表示（オプション）
+                cols = st.columns(4)
+                for i, (label, score) in enumerate(sub_scores.items()):
+                    cols[i].caption(f"{label}: {score}点")
+                
+                st.markdown("---")
                 st.markdown(evaluation)
                 
             with tab2:
