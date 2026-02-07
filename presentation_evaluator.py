@@ -21,10 +21,11 @@ from faster_whisper import WhisperModel
 
 
 # ==== グローバル設定 ====
-MODEL_LLM = "gpt-5.2-2025-12-11"
-# MODEL_LLM = "gpt-5-nano"
-MODEL_WHISPER = "small"
+# OpenRouterのモデルIDを指定 (例: openai/gpt-5.2, google/gemini-3-flash-preview, x-ai/grok-4.1-fast)
+MODEL_LLM = "openai/gpt-5-nano"
+MODEL_WHISPER = "small"     # medium だとかなりの時間がかかる
 _WHISPER_MODEL = None
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 # ==== 共通関数群 ====
@@ -50,6 +51,26 @@ def transcribe_audio(file_path):
         f.write(text)
 
     return text, segments
+
+
+def create_openrouter_client(api_key):
+    """OpenRouter用のOpenAI互換クライアントを作成"""
+    extra_headers = {}
+    site_url = os.environ.get("OPENROUTER_SITE_URL")
+    app_name = os.environ.get("OPENROUTER_APP_NAME")
+    if site_url:
+        extra_headers["HTTP-Referer"] = site_url
+    if app_name:
+        extra_headers["X-Title"] = app_name
+
+    client_kwargs = {
+        "api_key": api_key,
+        "base_url": OPENROUTER_BASE_URL
+    }
+    if extra_headers:
+        client_kwargs["default_headers"] = extra_headers
+
+    return openai.OpenAI(**client_kwargs)
 
 
 def analyze_speech(segments):
@@ -330,12 +351,12 @@ def run_cli_mode():
         sys.exit(1)
 
     # APIキーは環境変数から取得
-    api_key = os.environ.get('OPENAI_API_KEY')
+    api_key = os.environ.get('OPENROUTER_API_KEY')
     if not api_key:
-        print("エラー: OPENAI_API_KEY環境変数が設定されていません")
+        print("エラー: OPENROUTER_API_KEY環境変数が設定されていません")
         sys.exit(1)
 
-    client = openai.OpenAI(api_key=api_key)
+    client = create_openrouter_client(api_key)
     
     evaluate_presentation_core(audio_path, ppt_path, client)
 
@@ -373,7 +394,7 @@ def run_gui_mode():
     # サイドバー設定
     with st.sidebar:
         st.header("⚙️ 設定")
-        api_key = st.text_input("OpenAI API Keyを入力してください", type="password")
+        api_key = st.text_input("OpenRouter API Keyを入力してください", type="password")
         
         st.info(f"""
         **使用モデル:**
@@ -389,10 +410,10 @@ def run_gui_mode():
 
     # APIキーのチェック
     if not api_key:
-        st.warning("⚠️ 続行するにはサイドバーにOpenAI APIキーを入力してください。")
+        st.warning("⚠️ 続行するにはサイドバーにOpenRouter APIキーを入力してください。")
         st.stop()
 
-    client = openai.OpenAI(api_key=api_key)
+    client = create_openrouter_client(api_key)
 
     # ファイルアップロード
     col1, col2 = st.columns(2)
