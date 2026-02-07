@@ -17,28 +17,32 @@ except ImportError:
 import openai
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from faster_whisper import WhisperModel
 
 
 # ==== グローバル設定 ====
 MODEL_LLM = "gpt-5.2-2025-12-11"
 # MODEL_LLM = "gpt-5-nano"
-MODEL_WHISPER = "whisper-1"
+MODEL_WHISPER = "small"
+_WHISPER_MODEL = None
 
 
 # ==== 共通関数群 ====
 
-def transcribe_audio(file_path, client):
-    """音声ファイルをテキストに変換"""
-    audio_file = open(file_path, "rb")
-    response = client.audio.transcriptions.create(
-        model=MODEL_WHISPER,
-        file=audio_file,
-        response_format="verbose_json",
-        language="ja"
-    )
+def get_whisper_model():
+    """faster-whisperモデルを遅延読み込み"""
+    global _WHISPER_MODEL
+    if _WHISPER_MODEL is None:
+        _WHISPER_MODEL = WhisperModel(MODEL_WHISPER, device="auto", compute_type="int8")
+    return _WHISPER_MODEL
 
-    text = response.text
-    segments = response.segments
+
+def transcribe_audio(file_path):
+    """音声ファイルをテキストに変換"""
+    model = get_whisper_model()
+    segments_iter, _ = model.transcribe(file_path, language="ja", vad_filter=True)
+    segments = list(segments_iter)
+    text = " ".join(seg.text.strip() for seg in segments).strip()
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"transcription_{timestamp}.txt"
@@ -246,7 +250,7 @@ def evaluate_presentation_core(audio_path, ppt_path, client, progress_callback=N
             progress_callback(message)
 
     log("音声分析中")
-    text, segments = transcribe_audio(audio_path, client)
+    text, segments = transcribe_audio(audio_path)
     speech_analysis = analyze_speech(segments)
 
     log("資料分析中")
@@ -374,7 +378,7 @@ def run_gui_mode():
         st.info(f"""
         **使用モデル:**
         - LLM: {MODEL_LLM}
-        - 音声: {MODEL_WHISPER}
+        - 音声: faster-whisper ({MODEL_WHISPER})
         
         **分析項目:**
         1. 内容 (30%)
