@@ -22,7 +22,12 @@ from faster_whisper import WhisperModel
 
 # ==== グローバル設定 ====
 # OpenRouterのモデルIDを指定 (例: openai/gpt-5.2, google/gemini-3-flash-preview, x-ai/grok-4.1-fast)
-MODEL_LLM = "openai/gpt-5-nano"
+# マルチモーダルモデルの場合は下記のように記載
+# MODEL_LLM = "openai/gpt-5-nano"
+# MODEL_LLM_VL = MODEL_LLM
+# 画像解析の機能がないモデルの場合は、下記のようにそれぞれで指定して下さい。
+MODEL_LLM = "qwen/qwen3-235b-a22b-2507"
+MODEL_LLM_VL = "qwen/qwen3-vl-8b-instruct"
 MODEL_WHISPER = "small"     # medium だとかなりの時間がかかる
 _WHISPER_MODEL = None
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -134,7 +139,7 @@ def analyze_image(image_path, client):
     print(f"ファイル名: {image_path}")  # 画像分析で失敗する可能性があるため、デバッグ用に出力を追加
     base64_image = encode_image_to_base64(image_path)
     response = client.chat.completions.create(
-        model=MODEL_LLM,
+        model=MODEL_LLM_VL,
         messages=[
             {"role": "system", "content": "あなたは画像解析の専門家です。"},
             {
@@ -308,6 +313,10 @@ def evaluate_presentation_core(audio_path, ppt_path, client, progress_callback=N
         f.write(evaluation + "\n\n")
         f.write("==== 音声分析 ====\n")
         f.write(str(speech_analysis) + "\n\n")
+        f.write("==== 使用モデル ====\n")
+        f.write(f"- LLM(内容): {MODEL_LLM}\n")
+        f.write(f"- LLM(画像): {MODEL_LLM_VL}\n")
+        f.write(f"- 音声: faster-whisper ({MODEL_WHISPER})\n")
 
     log(f"評価結果をファイルに保存しました: {result_filename}")
 
@@ -398,7 +407,8 @@ def run_gui_mode():
         
         st.info(f"""
         **使用モデル:**
-        - LLM: {MODEL_LLM}
+        - LLM(内容): {MODEL_LLM}
+        - LLM(画像): {MODEL_LLM_VL}
         - 音声: faster-whisper ({MODEL_WHISPER})
         
         **分析項目:**
@@ -499,7 +509,9 @@ def run_gui_mode():
 
     # フッター
     st.markdown("---")
-    st.caption(f"Presentation Evaluator Pro v2.0 (統合版) | Powered by {MODEL_LLM}")
+    st.caption(
+        f"Presentation Evaluator Pro v2.0 (統合版) | Powered by LLM(内容): {MODEL_LLM} / LLM(画像): {MODEL_LLM_VL}"
+    )
 
 
 # ==== メイン実行部 ====
