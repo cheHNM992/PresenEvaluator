@@ -30,7 +30,7 @@ class LLMProvider(Enum):
 
 # ==== グローバル設定 ====
 # 使用するLLMプロバイダー設定
-PROVIDER = "openai"     # openai, openrouter, ollama
+PROVIDER = "ollama"     # openai, openrouter, ollama
 
 # OpenAI用設定
 MODEL_LLM_OPENAI = "gpt-5-nano"    # gpt-5.2, gpt-5-nano
@@ -49,6 +49,10 @@ OLLAMA_BASE_URL = "http://localhost:11434/v1"
 # 共通設定
 MODEL_WHISPER = "small"     # tiny, base, small, medium, large
 _WHISPER_MODEL = None
+
+# デバッグ設定
+DEBUG_USE_TRANSCRIPTION_FILE = False
+DEBUG_TRANSCRIPTION_FILE = "tmp/transcription_20260221_151004_cloud.txt" # "debug_transcription.txt"
 
 
 # ==== 共通関数群 ====
@@ -121,7 +125,15 @@ def create_client(provider, api_key=None):
 
 def transcribe_audio(file_path, client, provider):
     """音声ファイルをテキストに変換"""
-    if provider == LLMProvider.OPENAI:
+    if DEBUG_USE_TRANSCRIPTION_FILE:
+        if not os.path.exists(DEBUG_TRANSCRIPTION_FILE):
+            raise FileNotFoundError(
+                f"デバッグ用文字起こしファイルが見つかりません: {DEBUG_TRANSCRIPTION_FILE}"
+            )
+        with open(DEBUG_TRANSCRIPTION_FILE, "r", encoding="utf-8") as f:
+            text = f.read().strip()
+        segments = []
+    elif provider == LLMProvider.OPENAI:
         # OpenAI Whisper APIを使用
         audio_file = open(file_path, "rb")
         response = client.audio.transcriptions.create(
@@ -139,10 +151,13 @@ def transcribe_audio(file_path, client, provider):
         segments = list(segments_iter)
         text = " ".join(seg.text.strip() for seg in segments).strip()
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"transcription_{timestamp}.txt"
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(text)
+    if DEBUG_USE_TRANSCRIPTION_FILE:
+        print(f"デバッグモード: 文字起こしをファイルから読み込みました: {DEBUG_TRANSCRIPTION_FILE}")
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"transcription_{timestamp}.txt"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(text)
 
     return text, segments
 
