@@ -1,4 +1,5 @@
 # プレゼン評価システム (CLI/GUI統合版)
+# 対応LLM: OpenAI, OpenRouter, Ollama
 
 import os
 import sys
@@ -6,6 +7,7 @@ import re
 import base64
 import shutil
 from datetime import datetime
+from enum import Enum
 
 # Streamlitがインポート可能かチェック
 try:
@@ -17,20 +19,36 @@ except ImportError:
 import openai
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
-from faster_whisper import WhisperModel
+
+
+# ==== LLMプロバイダー ====
+class LLMProvider(Enum):
+    OPENAI = "openai"
+    OPENROUTER = "openrouter"
+    OLLAMA = "ollama"
 
 
 # ==== グローバル設定 ====
-# OpenRouterのモデルIDを指定 (例: openai/gpt-5.2, google/gemini-3-flash-preview, x-ai/grok-4.1-fast)
-# マルチモーダルモデルの場合は下記のように記載
-# MODEL_LLM = "openai/gpt-5-nano"
-# MODEL_LLM_VL = MODEL_LLM
-# 画像解析の機能がないモデルの場合は、下記のようにそれぞれで指定して下さい。
-MODEL_LLM = "qwen/qwen3-235b-a22b-2507"
-MODEL_LLM_VL = "qwen/qwen3-vl-8b-instruct"
-MODEL_WHISPER = "small"     # medium だとかなりの時間がかかる
-_WHISPER_MODEL = None
+# 使用するLLMプロバイダー設定
+PROVIDER = "openai"     # openai, openrouter, ollama
+
+# OpenAI用設定
+MODEL_LLM_OPENAI = "gpt-5-nano"    # gpt-5.2, gpt-5-nano
+MODEL_WHISPER_OPENAI = "whisper-1"
+
+# OpenRouter用設定
+MODEL_LLM_OPENROUTER = "nvidia/nemotron-3-nano-30b-a3b:free"    # 
+MODEL_LLM_VL_OPENROUTER = "nvidia/nemotron-nano-12b-v2-vl:free" # 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+# Ollama用設定
+MODEL_LLM_OLLAMA = "qwen3.5:cloud"
+MODEL_LLM_VL_OLLAMA = "qwen3.5:cloud"
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
+
+# 共通設定
+MODEL_WHISPER = "small"     # tiny, base, small, medium, large
+_WHISPER_MODEL = None
 
 
 # ==== 共通関数群 ====
@@ -39,16 +57,87 @@ def get_whisper_model():
     """faster-whisperモデルを遅延読み込み"""
     global _WHISPER_MODEL
     if _WHISPER_MODEL is None:
+        from faster_whisper import WhisperModel
         _WHISPER_MODEL = WhisperModel(MODEL_WHISPER, device="auto", compute_type="int8")
     return _WHISPER_MODEL
 
 
-def transcribe_audio(file_path):
+def get_model_config(provider):
+    """プロバイダーごとのモデル設定を取得"""
+    if provider == LLMProvider.OPENAI:
+        return {
+            "llm": MODEL_LLM_OPENAI,
+            "whisper": MODEL_WHISPER_OPENAI,
+            "vl": MODEL_LLM_OPENAI
+        }
+    elif provider == LLMProvider.OPENROUTER:
+        return {
+            "llm": MODEL_LLM_OPENROUTER,
+            "whisper": MODEL_WHISPER,
+            "vl": MODEL_LLM_VL_OPENROUTER
+        }
+    elif provider == LLMProvider.OLLAMA:
+        return {
+            "llm": MODEL_LLM_OLLAMA,
+            "whisper": MODEL_WHISPER,
+            "vl": MODEL_LLM_VL_OLLAMA
+        }
+
+
+def create_client(provider, api_key=None):
+    """LLMプロバイダーごとのクライアントを作成"""
+    if provider == LLMProvider.OPENAI:
+        if not api_key:
+            api_key = os.environ.get('OPENAI_API_KEY')
+        return openai.OpenAI(api_key=api_key)
+    
+    elif provider == LLMProvider.OPENROUTER:
+        if not api_key:
+            api_key = os.environ.get('OPENROUTER_API_KEY')
+        extra_headers = {}
+        site_url = os.environ.get("OPENROUTER_SITE_URL")
+        app_name = os.environ.get("OPENROUTER_APP_NAME")
+        if site_url:
+            extra_headers["HTTP-Referer"] = site_url
+        if app_name:
+            extra_headers["X-Title"] = app_name
+
+        client_kwargs = {
+            "api_key": api_key,
+            "base_url": OPENROUTER_BASE_URL
+        }
+        if extra_headers:
+            client_kwargs["default_headers"] = extra_headers
+
+        return openai.OpenAI(**client_kwargs)
+    
+    elif provider == LLMProvider.OLLAMA:
+        # OllamaはAPIキーを必要としない
+        return openai.OpenAI(
+            api_key="ollama",  # ダミーのAPIキー（OpenAIクライアントで必要）
+            base_url=OLLAMA_BASE_URL
+        )
+
+
+def transcribe_audio(file_path, client, provider):
     """音声ファイルをテキストに変換"""
-    model = get_whisper_model()
-    segments_iter, _ = model.transcribe(file_path, language="ja", vad_filter=True)
-    segments = list(segments_iter)
-    text = " ".join(seg.text.strip() for seg in segments).strip()
+    if provider == LLMProvider.OPENAI:
+        # OpenAI Whisper APIを使用
+        audio_file = open(file_path, "rb")
+        response = client.audio.transcriptions.create(
+            model=MODEL_WHISPER_OPENAI,
+            file=audio_file,
+            response_format="verbose_json",
+            language="ja"
+        )
+        text = response.text
+        segments = response.segments
+    else:
+        # faster-whisperを使用 (OpenRouter/Ollama)
+        model = get_whisper_model()
+        segments_iter, _ = model.transcribe(file_path, language="ja", vad_filter=True)
+        segments = list(segments_iter)
+        text = " ".join(seg.text.strip() for seg in segments).strip()
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"transcription_{timestamp}.txt"
@@ -58,28 +147,15 @@ def transcribe_audio(file_path):
     return text, segments
 
 
-def create_openrouter_client(api_key):
-    """OpenRouter用のOpenAI互換クライアントを作成"""
-    extra_headers = {}
-    site_url = os.environ.get("OPENROUTER_SITE_URL")
-    app_name = os.environ.get("OPENROUTER_APP_NAME")
-    if site_url:
-        extra_headers["HTTP-Referer"] = site_url
-    if app_name:
-        extra_headers["X-Title"] = app_name
-
-    client_kwargs = {
-        "api_key": api_key,
-        "base_url": OPENROUTER_BASE_URL
-    }
-    if extra_headers:
-        client_kwargs["default_headers"] = extra_headers
-
-    return openai.OpenAI(**client_kwargs)
-
-
 def analyze_speech(segments):
     """音声分析: WPM、フィラーワード、長い間の検出"""
+    if not segments:
+        return {
+            "wpm": 0,
+            "filler_count": 0,
+            "long_pauses": 0
+        }
+    
     total_words = sum(len(seg.text.split()) for seg in segments)
     duration_minutes = (segments[-1].end - segments[0].start) / 60.0
     wpm = total_words / duration_minutes if duration_minutes else 0
@@ -134,12 +210,12 @@ def encode_image_to_base64(image_path):
         return base64.b64encode(image_file.read()).decode('utf-8')
 
 
-def analyze_image(image_path, client):
+def analyze_image(image_path, client, model_config):
     """画像をAIで分析"""
     print(f"ファイル名: {image_path}")  # 画像分析で失敗する可能性があるため、デバッグ用に出力を追加
     base64_image = encode_image_to_base64(image_path)
     response = client.chat.completions.create(
-        model=MODEL_LLM_VL,
+        model=model_config["vl"],
         messages=[
             {"role": "system", "content": "あなたは画像解析の専門家です。"},
             {
@@ -164,19 +240,19 @@ def extract_visual_score(image_analysis):
     return 0
 
 
-def analyze_all_images(image_files, client):
+def analyze_all_images(image_files, client, model_config):
     """全画像を分析"""
     all_analyses = []
     for image_path in image_files:
-        analysis = analyze_image(image_path, client)
+        analysis = analyze_image(image_path, client, model_config)
         all_analyses.append(f"{image_path}:\n{analysis}\n")
     return "\n".join(all_analyses)
 
 
-def analyze_slide_text(slide_text, client):
+def analyze_slide_text(slide_text, client, model_config):
     """スライドテキストを分析"""
     response = client.chat.completions.create(
-        model=MODEL_LLM,
+        model=model_config["llm"],
         messages=[
             {"role": "system", "content": "あなたはプロのプレゼン資料評価者です。"},
             {"role": "user", "content": f"""
@@ -197,10 +273,10 @@ def analyze_slide_text(slide_text, client):
     return response.choices[0].message.content
 
 
-def generate_evaluation_with_images(transcription, slide_text_analysis, image_analysis, client):
+def generate_evaluation_with_images(transcription, slide_text_analysis, image_analysis, client, model_config):
     """総合評価を生成"""
     response = client.chat.completions.create(
-        model=MODEL_LLM,
+        model=model_config["llm"],
         messages=[
             {"role": "system", "content": "あなたはプロのプレゼン評価者です。"},
             {"role": "user", "content": f"""
@@ -265,35 +341,37 @@ def compute_score(sub_scores):
     return int(round(total, 0))
 
 
-def evaluate_presentation_core(audio_path, ppt_path, client, progress_callback=None):
+def evaluate_presentation_core(audio_path, ppt_path, client, provider, progress_callback=None):
     """
     プレゼン評価のコア処理
     progress_callback: 進捗を通知するコールバック関数(GUI用)
     """
+    model_config = get_model_config(provider)
+    
     def log(message):
         print(message)
         if progress_callback:
             progress_callback(message)
 
     log("音声分析中")
-    text, segments = transcribe_audio(audio_path)
+    text, segments = transcribe_audio(audio_path, client, provider)
     speech_analysis = analyze_speech(segments)
 
     log("資料分析中")
     slides_text = extract_ppt_text(ppt_path)
-    slide_text_analysis = analyze_slide_text(slides_text, client)
+    slide_text_analysis = analyze_slide_text(slides_text, client, model_config)
 
     log("画像解析中")
     image_files = extract_images_from_ppt(ppt_path, "extracted_images")
     if image_files:
-        image_analysis = analyze_all_images(image_files, client)
+        image_analysis = analyze_all_images(image_files, client, model_config)
         image_visual_score = extract_visual_score(image_analysis)
     else:
         image_analysis = "画像は含まれていません。"
         image_visual_score = 0
 
     log("総合評価生成中")
-    evaluation = generate_evaluation_with_images(text, slide_text_analysis, image_analysis, client)
+    evaluation = generate_evaluation_with_images(text, slide_text_analysis, image_analysis, client, model_config)
 
     sub_scores = extract_scores(evaluation)
     # 画像なしの場合は画像の得点を判定しないようにする
@@ -314,9 +392,10 @@ def evaluate_presentation_core(audio_path, ppt_path, client, progress_callback=N
         f.write("==== 音声分析 ====\n")
         f.write(str(speech_analysis) + "\n\n")
         f.write("==== 使用モデル ====\n")
-        f.write(f"- LLM(内容): {MODEL_LLM}\n")
-        f.write(f"- LLM(画像): {MODEL_LLM_VL}\n")
-        f.write(f"- 音声: faster-whisper ({MODEL_WHISPER})\n")
+        f.write(f"- プロバイダー: {provider.value}\n")
+        f.write(f"- LLM(内容): {model_config['llm']}\n")
+        f.write(f"- LLM(画像): {model_config['vl']}\n")
+        f.write(f"- 音声: {model_config['whisper']}\n")
 
     log(f"評価結果をファイルに保存しました: {result_filename}")
 
@@ -337,16 +416,29 @@ def evaluate_presentation_core(audio_path, ppt_path, client, progress_callback=N
         "transcription": text,
         "slide_text_analysis": slide_text_analysis,
         "image_analysis": image_analysis,
-        "image_files": image_files
+        "image_files": image_files,
+        "provider": provider.value,
+        "model_config": model_config
     }
 
 
 # ==== CLIモード ====
 def run_cli_mode():
     """コマンドライン実行モード"""
+    # プロバイダーの指定
+    provider_name = os.environ.get('LLM_PROVIDER', PROVIDER).lower()
+    try:
+        provider = LLMProvider(provider_name)
+    except ValueError:
+        print(f"エラー: 不正なプロバイダー名 '{provider_name}'")
+        print(f"有効なプロバイダー: {[p.value for p in LLMProvider]}")
+        sys.exit(1)
+
     if len(sys.argv) != 3:
         print("使用方法: python presentation_evaluator.py 音声ファイル パワポファイル")
         print("例: python presentation_evaluator.py sample.wav slides.pptx")
+        print(f"\n現在設定されているプロバイダー: {provider.value}")
+        print("プロバイダーを変更するには環境変数 LLM_PROVIDER を設定してください")
         sys.exit(1)
 
     audio_path = sys.argv[1]
@@ -359,15 +451,27 @@ def run_cli_mode():
         print(f"PowerPointファイルが見つかりません: {ppt_path}")
         sys.exit(1)
 
-    # APIキーは環境変数から取得
-    api_key = os.environ.get('OPENROUTER_API_KEY')
-    if not api_key:
-        print("エラー: OPENROUTER_API_KEY環境変数が設定されていません")
-        sys.exit(1)
+    # APIキー取得
+    api_key = None
+    if provider == LLMProvider.OPENAI:
+        api_key = os.environ.get('OPENAI_API_KEY')
+        if not api_key:
+            print("エラー: OPENAI_API_KEY環境変数が設定されていません")
+            sys.exit(1)
+    elif provider == LLMProvider.OPENROUTER:
+        api_key = os.environ.get('OPENROUTER_API_KEY')
+        if not api_key:
+            print("エラー: OPENROUTER_API_KEY環境変数が設定されていません")
+            sys.exit(1)
+    # OllamaはAPIキー不要
 
-    client = create_openrouter_client(api_key)
+    client = create_client(provider, api_key)
+    model_config = get_model_config(provider)
     
-    evaluate_presentation_core(audio_path, ppt_path, client)
+    print(f"使用プロバイダー: {provider.value}")
+    print(f"使用LLM: {model_config['llm']}")
+    
+    evaluate_presentation_core(audio_path, ppt_path, client, provider)
 
 
 # ==== GUIモード ====
@@ -403,13 +507,36 @@ def run_gui_mode():
     # サイドバー設定
     with st.sidebar:
         st.header("⚙️ 設定")
-        api_key = st.text_input("OpenRouter API Keyを入力してください", type="password")
+        
+        # プロバイダー選択
+        provider_select = st.selectbox(
+            "LLMプロバイダーを選択",
+            options=[p.value for p in LLMProvider],
+            index=[p.value for p in LLMProvider].index(PROVIDER)
+        )
+        provider = LLMProvider(provider_select)
+        model_config = get_model_config(provider)
+        
+        # APIキー入力（プロバイダーによって表示切替）
+        api_key = None
+        if provider == LLMProvider.OPENAI:
+            api_key = st.text_input("OpenAI API Keyを入力してください", type="password")
+            if not api_key:
+                st.warning("⚠️ 続行するにはOpenAI APIキーを入力してください。")
+                st.stop()
+        elif provider == LLMProvider.OPENROUTER:
+            api_key = st.text_input("OpenRouter API Keyを入力してください", type="password")
+            if not api_key:
+                st.warning("⚠️ 続行するにはOpenRouter APIキーを入力してください。")
+                st.stop()
+        else:
+            st.info("Ollamaを使用します。Ollamaが起動していることを確認してください。")
         
         st.info(f"""
         **使用モデル:**
-        - LLM(内容): {MODEL_LLM}
-        - LLM(画像): {MODEL_LLM_VL}
-        - 音声: faster-whisper ({MODEL_WHISPER})
+        - LLM(内容): {model_config['llm']}
+        - LLM(画像): {model_config['vl']}
+        - 音声: {model_config['whisper']}
         
         **分析項目:**
         1. 内容 (30%)
@@ -418,12 +545,7 @@ def run_gui_mode():
         4. 構成 (20%)
         """)
 
-    # APIキーのチェック
-    if not api_key:
-        st.warning("⚠️ 続行するにはサイドバーにOpenRouter APIキーを入力してください。")
-        st.stop()
-
-    client = create_openrouter_client(api_key)
+    client = create_client(provider, api_key)
 
     # ファイルアップロード
     col1, col2 = st.columns(2)
@@ -463,7 +585,7 @@ def run_gui_mode():
                         st.write(f"{icon} {msg}...")
 
                     result = evaluate_presentation_core(
-                        audio_path, ppt_path, client, 
+                        audio_path, ppt_path, client, provider,
                         progress_callback=progress_callback
                     )
 
@@ -510,7 +632,7 @@ def run_gui_mode():
     # フッター
     st.markdown("---")
     st.caption(
-        f"Presentation Evaluator Pro v2.0 (統合版) | Powered by LLM(内容): {MODEL_LLM} / LLM(画像): {MODEL_LLM_VL}"
+        f"Presentation Evaluator Pro v2.0 (統合版) | Powered by {provider.value.upper()} | LLM: {model_config['llm']}"
     )
 
 
@@ -527,7 +649,9 @@ if __name__ == "__main__":
         else:
             print("エラー: Streamlitがインストールされていません")
             print("GUIモードを使用するには: pip install streamlit")
-            print("  streamlit run .\presentation_evaluator.py")
+            print("  streamlit run presentation_evaluator.py")
             print("\nCLIモードで使用する場合:")
             print("  python presentation_evaluator.py <音声ファイル> <PowerPointファイル>")
+            print(f"\n環境変数 LLM_PROVIDER でプロバイダーを指定できます: openai, openrouter, ollama")
+            print(f"現在のプロバイダー: {PROVIDER}")
             sys.exit(1)
