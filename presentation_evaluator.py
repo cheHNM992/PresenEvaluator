@@ -20,8 +20,8 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 
 # ==== グローバル設定 ====
-MODEL_LLM = "gpt-5.2-2025-12-11"
-# MODEL_LLM = "gpt-5-nano"
+MODEL_LLM = "gpt-5.4"
+# MODEL_LLM = "gpt-5.4-nano"
 MODEL_WHISPER = "whisper-1"
 
 
@@ -41,7 +41,8 @@ def transcribe_audio(file_path, client):
     segments = response.segments
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"transcription_{timestamp}.txt"
+    audio_filename = os.path.splitext(os.path.basename(file_path))[0]
+    filename = f"transcription_{timestamp}_{audio_filename}.txt"
     with open(filename, "w", encoding="utf-8") as f:
         f.write(text)
 
@@ -275,7 +276,8 @@ def evaluate_presentation_core(audio_path, ppt_path, client, progress_callback=N
 
     # 結果を保存
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_filename = f"evaluation_result_{timestamp}.txt"
+    ppt_filename = os.path.splitext(os.path.basename(ppt_path))[0]
+    result_filename = f"evaluation_result_{timestamp}_{ppt_filename}.txt"
 
     with open(result_filename, "w", encoding="utf-8") as f:
         f.write(f"==== 総合得点: {total_score}点 ====\n\n")
