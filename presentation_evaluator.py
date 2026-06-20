@@ -30,15 +30,16 @@ class LLMProvider(Enum):
 
 # ==== グローバル設定 ====
 # 使用するLLMプロバイダー設定
-PROVIDER = "ollama"     # openai, openrouter, ollama
+PROVIDER = "openrouter"     # openai, openrouter, ollama
 
 # OpenAI用設定
-MODEL_LLM_OPENAI = "gpt-5-nano"    # gpt-5.2, gpt-5-nano
-MODEL_WHISPER_OPENAI = "whisper-1"
+MODEL_LLM_OPENAI = "gpt-5.5"    # gpt-5.4-nano
+MODEL_SPEECH_OPENAI = "whisper-1"
 
 # OpenRouter用設定
-MODEL_LLM_OPENROUTER = "nvidia/nemotron-3-nano-30b-a3b:free"    # 
-MODEL_LLM_VL_OPENROUTER = "nvidia/nemotron-nano-12b-v2-vl:free" # 
+MODEL_LLM_OPENROUTER = "minimax/minimax-m3"    # z-ai/glm-5.2
+MODEL_LLM_VL_OPENROUTER = "minimax/minimax-m3" # microsoft/mai-image-2.5
+MODEL_SPEECH_OPENROUTER = "google/gemini-3.5-flash" # microsoft/mai-transcribe-1.5
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # Ollama用設定
@@ -50,9 +51,14 @@ OLLAMA_BASE_URL = "http://localhost:11434/v1"
 MODEL_WHISPER = "small"     # tiny, base, small, medium, large
 _WHISPER_MODEL = None
 
+OPENROUTER_AUDIO_FORMATS = {
+    "aac", "aiff", "flac", "m4a", "mp3", "mp4", "mpeg", "mpga",
+    "oga", "ogg", "pcm16", "pcm24", "wav", "webm"
+}
+
 # デバッグ設定
-DEBUG_USE_TRANSCRIPTION_FILE = False
-DEBUG_TRANSCRIPTION_FILE = "tmp/transcription_20260221_151004_cloud.txt" # "debug_transcription.txt"
+DEBUG_USE_TRANSCRIPTION_FILE = True
+DEBUG_TRANSCRIPTION_FILE = "tmp/debug_transcription.txt"
 
 
 # ==== 共通関数群 ====
@@ -66,18 +72,33 @@ def get_whisper_model():
     return _WHISPER_MODEL
 
 
+def encode_audio_for_openrouter(file_path):
+    """OpenRouterのinput_audio用に音声形式とBase64データを返す"""
+    audio_format = os.path.splitext(file_path)[1].lower().lstrip(".")
+    if audio_format not in OPENROUTER_AUDIO_FORMATS:
+        supported = ", ".join(sorted(OPENROUTER_AUDIO_FORMATS))
+        raise ValueError(
+            f"OpenRouterで未対応の音声形式です: {audio_format or '(拡張子なし)'} "
+            f"(対応形式: {supported})"
+        )
+
+    with open(file_path, "rb") as audio_file:
+        audio_data = base64.b64encode(audio_file.read()).decode("ascii")
+    return audio_format, audio_data
+
+
 def get_model_config(provider):
     """プロバイダーごとのモデル設定を取得"""
     if provider == LLMProvider.OPENAI:
         return {
             "llm": MODEL_LLM_OPENAI,
-            "whisper": MODEL_WHISPER_OPENAI,
+            "whisper": MODEL_SPEECH_OPENAI,
             "vl": MODEL_LLM_OPENAI
         }
     elif provider == LLMProvider.OPENROUTER:
         return {
             "llm": MODEL_LLM_OPENROUTER,
-            "whisper": MODEL_WHISPER,
+            "whisper": MODEL_SPEECH_OPENROUTER,
             "vl": MODEL_LLM_VL_OPENROUTER
         }
     elif provider == LLMProvider.OLLAMA:
@@ -134,18 +155,50 @@ def transcribe_audio(file_path, client, provider):
             text = f.read().strip()
         segments = []
     elif provider == LLMProvider.OPENAI:
-        # OpenAI Whisper APIを使用
+        # OpenAIの音声文字起こしAPIを使用
         audio_file = open(file_path, "rb")
         response = client.audio.transcriptions.create(
-            model=MODEL_WHISPER_OPENAI,
+            model=MODEL_SPEECH_OPENAI,
             file=audio_file,
             response_format="verbose_json",
             language="ja"
         )
         text = response.text
         segments = response.segments
+    elif provider == LLMProvider.OPENROUTER:
+        # OpenRouterはChat CompletionsへBase64音声を送信する
+        # この方法はGeminiなどの音声対応マルチモーダルモデル向けであり、
+        # WhisperやMAI-Transcribeなどの専用STTモデルには不適切
+        # 実装方法の再検討が必要
+        audio_format, base64_audio = encode_audio_for_openrouter(file_path)
+        response = client.chat.completions.create(
+            model=MODEL_SPEECH_OPENROUTER,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "この日本語音声を省略や要約をせず、忠実に文字起こししてください。文字起こし本文だけを出力してください。"
+                        },
+                        {
+                            "type": "input_audio",
+                            "input_audio": {
+                                "data": base64_audio,
+                                "format": audio_format
+                            }
+                        }
+                    ]
+                }
+            ]
+        )
+        text = response.choices[0].message.content
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("OpenRouterから文字起こしテキストが返されませんでした")
+        text = text.strip()
+        segments = []
     else:
-        # faster-whisperを使用 (OpenRouter/Ollama)
+        # faster-whisperを使用 (Ollama)
         model = get_whisper_model()
         segments_iter, _ = model.transcribe(file_path, language="ja", vad_filter=True)
         segments = list(segments_iter)
